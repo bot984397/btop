@@ -85,7 +85,7 @@ namespace Runner {
 
 namespace Tools {
 	//* Platform specific function for system_uptime (seconds since last restart)
-	double system_uptime();
+	long system_uptime();
 }
 
 namespace Shared {
