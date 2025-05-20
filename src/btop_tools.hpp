@@ -514,5 +514,11 @@ namespace fsutil {
       return { value, FsUtilError::NoError };
    }
 
+   template<typename T = std::string>
+   T read_value_or(const fs::path& path, const T& fallback) {
+      auto [v, err] = read_value<T>(path);
+      return v.value_or(fallback);
+   }
+
    std::string err_to_string(FsUtilError error, const fs::path& path);
 }
