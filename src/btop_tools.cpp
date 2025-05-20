@@ -718,3 +718,17 @@ namespace Logger {
 		}
 	}
 }
+
+std::string fsutil::err_to_string(FsUtilError error, const fs::path& path) {
+   switch (error) {
+      case FsUtilError::PathDoesNotExist:
+         return "Path does not exist: " + path.string();
+      case FsUtilError::FileOpenFailed:
+         return "Failed to open file: " + path.string();
+      case FsUtilError::FileReadFailed:
+         return "Failed to read file: " + path.string();
+      case FsUtilError::NoError:
+         return "No error";
+   }
+   return "Unknown error";
+}

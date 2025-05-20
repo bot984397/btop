@@ -674,28 +674,37 @@ namespace Cpu {
 		if (batteries.empty() and has_battery) {
 			try {
 				if (fs::exists("/sys/class/power_supply")) {
-					for (const auto& d : fs::directory_iterator("/sys/class/power_supply")) {
+					for (const auto& dir_it : fs::directory_iterator("/sys/class/power_supply")) {
 						//? Only consider online power supplies of type Battery or UPS
 						//? see kernel docs for details on the file structure and contents
 						//? https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-class-power
 						battery new_bat;
 						fs::path bat_dir;
-						try {
-							if (not d.is_directory()
-								or not fs::exists(d.path() / "type")
-								or not fs::exists(d.path() / "present")
-								or stoi(readfile(d.path() / "present")) != 1)
-								continue;
-							string dev_type = readfile(d.path() / "type");
-							if (is_in(dev_type, "Battery", "UPS")) {
-								bat_dir = d.path();
-								new_bat.base_dir = d.path();
-								new_bat.device_type = dev_type;
-							}
-						} catch (...) {
-							//? skip power supplies not conforming to the kernel standard
-							continue;
-						}
+
+                  fs::path path = dir_it.path();
+						if (!dir_it.is_directory()) {
+                     continue;
+                  }
+
+                  auto [v_present, err_present] = fsutil::read_value<int>(path / "present");
+                  auto [v_type, err_type] = fsutil::read_value(path / "type");
+
+                  if (!v_present.has_value()) {
+                     Logger::error(fsutil::err_to_string(err_present, path / "present"));
+                     continue;
+                  }
+                  if (!v_type.has_value()) {
+                     Logger::error(fsutil::err_to_string(err_type, path / "type"));
+                     continue;
+                  }
+
+                  if (v_present.value() != 1 || !is_in(v_type.value(), "Battery", "UPS")) {
+                     continue;
+                  }
+
+                  bat_dir = path;
+                  new_bat.base_dir = path;
+                  new_bat.device_type = v_type.value();
 
 						if (fs::exists(bat_dir / "energy_now")) new_bat.energy_now = bat_dir / "energy_now";
 						else if (fs::exists(bat_dir / "charge_now")) new_bat.charge_now = bat_dir / "charge_now";

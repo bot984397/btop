@@ -49,6 +49,8 @@ tab-size = 4
 	#endif
 #endif
 
+#include <fstream>
+
 #include "fmt/core.h"
 #include "fmt/format.h"
 
@@ -60,6 +62,9 @@ using std::string_view;
 using std::tuple;
 using std::vector;
 using namespace fmt::literals;
+
+//? Used by fsutil::read_value
+namespace fs = std::filesystem;
 
 //? ------------------------------------------------- NAMESPACES ------------------------------------------------------
 
@@ -480,4 +485,34 @@ namespace Tools {
 		bool is_running();
 	};
 
+}
+
+namespace fsutil {
+   enum class FsUtilError {
+      NoError,
+      PathDoesNotExist,
+      FileOpenFailed,
+      FileReadFailed,
+   };
+
+   template<typename T = std::string>
+   std::pair<std::optional<T>, FsUtilError> read_value(const fs::path& path) {
+      if (!fs::exists(path)) {
+         return { std::nullopt, FsUtilError::PathDoesNotExist };
+      }
+      std::ifstream file(path);
+      if (!file.is_open()) {
+         return { std::nullopt, FsUtilError::FileOpenFailed };
+      }
+      
+      T value;
+      file >> value;
+      
+      if (file.fail()) {
+         return { std::nullopt, FsUtilError::FileReadFailed };
+      }
+      return { value, FsUtilError::NoError };
+   }
+
+   std::string err_to_string(FsUtilError error, const fs::path& path);
 }
