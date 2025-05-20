@@ -303,8 +303,15 @@ namespace Tools {
 	}
 
 	//* Convert string to bool, returning any value not equal to "true" or "True" as false
+   //? Removed variadic template + full string comparison overhead
 	inline bool stobool(const std::string_view str) {
-		return is_in(str, "true", "True");
+      if (str.length() != 4) {
+         return false;
+      }
+      if (str[0] != 't' && str[0] != 'T') {
+         return false;
+      }
+      return (str[1] == 'r' && str[2] == 'u' && str[3] == 'e');
 	}
 
 	//* Check if a string is a valid integer value (only positive)
@@ -361,48 +368,40 @@ namespace Tools {
 	std::string operator*(const string& str, int64_t n);
 
 	template <typename K, typename T>
+	const T& safeVal(const std::unordered_map<K, T>& map, const K& key, const T& fallback = T{}
 #ifdef BTOP_DEBUG
-	const T& safeVal(const std::unordered_map<K, T>& map, const K& key, const T& fallback = T{}, std::source_location loc = std::source_location::current()) {
-		if (auto it = map.find(key); it != map.end()) {
-			return it->second;
-		} else {
-			Logger::error(fmt::format("safeVal() called with invalid key: [{}] in file: {} on line: {}", key, loc.file_name(), loc.line()));
-			return fallback;
-		}
-	};
-#else
-	const T& safeVal(const std::unordered_map<K, T>& map, const K& key, const T& fallback = T{}) {
-		if (auto it = map.find(key); it != map.end()) {
-			return it->second;
-		} else {
-			Logger::error(fmt::format("safeVal() called with invalid key: [{}] (Compile btop with DEBUG=true for more extensive logging!)", key));
-			return fallback;
-		}
-	};
+   , std::source_location loc = std::source_location::current()
 #endif
+   ) {
+	   if (auto it = map.find(key); it != map.end()) {
+			return it->second;
+		} else {
+#ifdef BTOP_DEBUG
+			Logger::error(fmt::format("safeVal() called with invalid key: [{}] in file: {} on line: {}", key, loc.file_name(), loc.line()));
+#else
+			Logger::error(fmt::format("safeVal() called with invalid key: [{}] (Compile btop with DEBUG=true for more extensive logging!)", key));
+#endif
+			return fallback;
+		}
+	};
 
 	template <typename T>
+	const T& safeVal(const std::vector<T>& vec, const size_t& index, const T& fallback = T{}
 #ifdef BTOP_DEBUG
-	const T& safeVal(const std::vector<T>& vec, const size_t& index, const T& fallback = T{}, std::source_location loc = std::source_location::current()) {
-		if (index < vec.size()) {
-			return vec[index];
-		} else {
-			Logger::error(fmt::format("safeVal() called with invalid index: [{}] in file: {} on line: {}", index, loc.file_name(), loc.line()));
-			return fallback;
-		}
-	};
-#else
-	const T& safeVal(const std::vector<T>& vec, const size_t& index, const T& fallback = T{}) {
-		if (index < vec.size()) {
-			return vec[index];
-		} else {
-			Logger::error(fmt::format("safeVal() called with invalid index: [{}] (Compile btop with DEBUG=true for more extensive logging!)", index));
-			return fallback;
-		}
-	};
+   , std::source_location loc = std::source_location::current()
 #endif
-
-
+   ) {
+	   if (index < vec.size()) {
+			return vec[index];
+		} else {
+#ifdef BTOP_DEBUG
+			Logger::error(fmt::format("safeVal() called with invalid index: [{}] in file: {} on line: {}", index, loc.file_name(), loc.line()));
+#else
+			Logger::error(fmt::format("safeVal() called with invalid key: [{}] (Compile btop with DEBUG=true for more extensive logging!)", key));
+#endif
+			return fallback;
+		}
+	};
 
 	//* Return current time in <strf> format
 	string strf_time(const string& strf);
