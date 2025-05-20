@@ -620,18 +620,26 @@ namespace Config {
 				ints.at("selected_depth") = Proc::selected_depth;
 			}
 
+         //? Fixed crash when quickly changing presets (e.g. holding 'p')
+
 			for (auto& item : stringsTmp) {
-				strings.at(item.first) = item.second;
+            if (strings.count(item.first)) {
+				   strings.at(item.first) = item.second;
+            }
 			}
 			stringsTmp.clear();
 
 			for (auto& item : intsTmp) {
-				ints.at(item.first) = item.second;
+            if (ints.at(item.first)) {
+				   ints.at(item.first) = item.second;
+            }
 			}
 			intsTmp.clear();
 
 			for (auto& item : boolsTmp) {
-				bools.at(item.first) = item.second;
+            if (bools.at(item.first)) {
+				   bools.at(item.first) = item.second;
+            }
 			}
 			boolsTmp.clear();
 		}
