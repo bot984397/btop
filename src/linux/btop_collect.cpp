@@ -237,8 +237,6 @@ namespace Mem {
 }
 
 namespace Shared {
-   BatteryManager batteryManager;
-
 	fs::path procPath, passwd_path;
 	long pageSize, clkTck, coreCount;
 
@@ -317,8 +315,6 @@ namespace Shared {
 		//? Init for namespace Mem
 		Mem::old_uptime = system_uptime();
 		Mem::collect();
-
-      batteryManager = BatteryManager();
 
 		Logger::debug("Shared::init() : Initialized.");
 	}
@@ -661,13 +657,6 @@ namespace Cpu {
 		return core_map;
 	}
 
-	struct battery {
-		fs::path base_dir, energy_now, charge_now, energy_full, charge_full, power_now, current_now, voltage_now, status, online;
-		string device_type;
-		bool use_energy_or_charge = true;
-		bool use_power = true;
-	};
-
    auto collect(bool no_update) -> cpu_info& {
 		if (Runner::stopping or (no_update and not current_cpu.cpu_percent.at("total").empty())) return current_cpu;
 		auto& cpu = current_cpu;
@@ -799,19 +788,11 @@ namespace Cpu {
 			else throw std::runtime_error("Cpu::collect() : " + string{e.what()});
 		}
 
-		if (Config::getB("check_temp") and got_sensors)
+		if (Config::getB("check_temp") && got_sensors)
 			update_sensors();
 
-		if (Config::getB("show_battery") and has_battery) {
-         Battery& bat = Shared::batteryManager.getSelectedBattery();
-         bat.updateState();
-         std::get<0>(current_bat) = bat.percent;
-         std::get<1>(current_bat) = bat.watts;
-         std::get<2>(current_bat) = bat.seconds;
-         if (bat.state == BatteryState::STATE_FULL) std::get<3>(current_bat) = "full";
-         if (bat.state == BatteryState::STATE_CHARGING) std::get<3>(current_bat) = "charging";
-         if (bat.state == BatteryState::STATE_DISCHARGING) std::get<3>(current_bat) = "discharging";
-         else std::get<3>(current_bat) = "unknown";
+		if (Config::getB("show_battery") && has_battery) {
+         BatteryManager::getInstance().getSelectedBattery().updateState();
       }
 
 		return cpu;
@@ -3008,9 +2989,7 @@ void BatteryManager::enumBatteries() {
       Logger::error("Filesystem error " + std::string(e.what()));
    }
 
-   if (m_batteries.empty()) {
-      m_has_battery = false;
-   }
+   m_has_battery = !m_batteries.empty();
 }
 
 Battery& BatteryManager::getSelectedBattery() {
@@ -3018,4 +2997,8 @@ Battery& BatteryManager::getSelectedBattery() {
       enumBatteries();
    }
    return m_batteries.begin()->second;
+}
+
+bool BatteryManager::hasBattery() {
+   return m_has_battery;
 }

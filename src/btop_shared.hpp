@@ -482,11 +482,20 @@ private:
 //? Class encapsulating battery enumeration and management
 class BatteryManager {
 public:
-   BatteryManager();
+   static BatteryManager& getInstance() {
+      static BatteryManager instance;
+      return instance;
+   }
+
+   BatteryManager(const BatteryManager&) = delete;
+   BatteryManager& operator=(const BatteryManager&) = delete;
+
    Battery& getSelectedBattery();
+   bool hasBattery();
 private:
+   BatteryManager();
+
    std::unordered_map<std::string, Battery> m_batteries;
    bool m_has_battery;
-
    void enumBatteries();
 };

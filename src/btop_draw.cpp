@@ -708,21 +708,28 @@ namespace Cpu {
 			}
 		}
 
+      BatteryManager& batteryManager = BatteryManager::getInstance();
+
 		//? Draw battery if enabled and present
-		if (Config::getB("show_battery") and has_battery) {
+		if (Config::getB("show_battery") && batteryManager.hasBattery()) {
 			static int old_percent{};   // defaults to = 0
 			static long old_seconds{};  // defaults to = 0
 			static float old_watts{};	// defaults to = 0
-			static string old_status;
+			static BatteryState old_status;
 			static Draw::Meter bat_meter {10, "cpu", true};
-			static const std::unordered_map<string, string> bat_symbols = {
-				{"charging", "▲"},
-				{"discharging", "▼"},
-				{"full", "■"},
-				{"unknown", "○"}
-			};
 
-			const auto& [percent, watts, seconds, status] = current_bat;
+         static const std::unordered_map<BatteryState, std::string> bat_symbols = {
+			   { BatteryState::STATE_CHARGING,     "▲" },
+				{ BatteryState::STATE_DISCHARGING,  "▼" },
+				{ BatteryState::STATE_FULL,         "■" },
+				{ BatteryState::STATE_UNKNOWN,      "○" }
+         };
+
+         Battery& bat = batteryManager.getSelectedBattery();
+         const auto& percent = bat.percent;
+         const auto& watts = bat.watts;
+         const auto& seconds = bat.seconds;
+         const auto& status = bat.state;
 
 			if (redraw || percent != old_percent || (watts != old_watts && Config::getB("show_battery_watts")) || seconds != old_seconds || status != old_status) {
 				old_percent = percent;
@@ -732,8 +739,8 @@ namespace Cpu {
 				const string str_time = (seconds > 0 ? sec_to_dhms(seconds, false, true) : "");
 				const string str_percent = to_string(percent) + '%';
 				const string str_watts = (watts != -1 and Config::getB("show_battery_watts") ? fmt::format("{:.2f}", watts) + 'W' : "");
-				const auto& bat_symbol = bat_symbols.at((bat_symbols.contains(status) ? status : "unknown"));
-				const int current_len = (Term::width >= 100 ? 11 : 0) + str_time.size() + str_percent.size() + str_watts.size() + to_string(Config::getI("update_ms")).size();
+				const auto& bat_symbol = bat_symbols.at(status);
+            const int current_len = (Term::width >= 100 ? 11 : 0) + str_time.size() + str_percent.size() + str_watts.size() + to_string(Config::getI("update_ms")).size();
 				const int current_pos = Term::width - current_len - 17;
 
 				if ((bat_pos != current_pos or bat_len != current_len) and bat_pos > 0 and not redraw)
