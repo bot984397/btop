@@ -49,6 +49,8 @@ using std::vector;
 
 using namespace std::literals; // for operator""s
 
+namespace fs = std::filesystem;
+
 void term_resize(bool force=false);
 void banner_gen();
 
@@ -439,3 +441,52 @@ namespace Proc {
 				   int cur_depth, bool collapsed, const string& filter,
 				   bool found = false, bool no_update = false, bool should_filter = false);
 }
+
+//? Enum representing battery state
+enum class BatteryState {
+   STATE_UNKNOWN,
+   STATE_CHARGING,
+   STATE_DISCHARGING,
+   STATE_FULL,
+};
+
+//? Class representing a battery
+class Battery {
+public:
+   fs::path base_dir;
+   fs::path path_online;
+   fs::path path_energy_now;
+   fs::path path_charge_now;
+   fs::path path_energy_full;
+   fs::path path_charge_full;
+   fs::path path_power_now;
+   fs::path path_current_now;
+   fs::path path_voltage_now;
+
+   bool use_energy_or_charge;
+   bool use_power;
+
+   int percent;
+   long seconds;
+   float watts;
+   BatteryState state;
+
+   std::string dev_type;
+
+   Battery();
+   void updateState();
+private:
+   BatteryState getState();
+};
+
+//? Class encapsulating battery enumeration and management
+class BatteryManager {
+public:
+   BatteryManager();
+   Battery& getSelectedBattery();
+private:
+   std::unordered_map<std::string, Battery> m_batteries;
+   bool m_has_battery;
+
+   void enumBatteries();
+};

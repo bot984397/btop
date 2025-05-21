@@ -237,6 +237,7 @@ namespace Mem {
 }
 
 namespace Shared {
+   BatteryManager batteryManager;
 
 	fs::path procPath, passwd_path;
 	long pageSize, clkTck, coreCount;
@@ -316,6 +317,8 @@ namespace Shared {
 		//? Init for namespace Mem
 		Mem::old_uptime = system_uptime();
 		Mem::collect();
+
+      batteryManager = BatteryManager();
 
 		Logger::debug("Shared::init() : Initialized.");
 	}
@@ -508,7 +511,7 @@ namespace Cpu {
 			}
 		}
 
-		return not found_sensors.empty();
+		return !found_sensors.empty();
 	}
 
 	static void update_sensors() {
@@ -665,189 +668,7 @@ namespace Cpu {
 		bool use_power = true;
 	};
 
-	auto get_battery() -> tuple<int, float, long, string> {
-		if (not has_battery) return {0, 0, 0, ""};
-		static string auto_sel;
-		static std::unordered_map<string, battery> batteries;
-
-		//? Get paths to needed files and check for valid values on first run
-		if (batteries.empty() && has_battery) {
-			if (fs::exists("/sys/class/power_supply")) {
-				try {
-               for (const auto& dir_it : fs::directory_iterator("/sys/class/power_supply")) {
-					   //? Only consider online power supplies of type Battery or UPS
-					   //? see kernel docs for details on the file structure and contents
-					   //? https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-class-power
-						
-                  battery new_bat;
-						fs::path bat_dir;
-
-                  fs::path path = dir_it.path();
-						if (!dir_it.is_directory()) {
-                     continue;
-                  }
-
-                  auto [v_present, err_present] = fsutil::read_value<int>(path / "present");
-                  auto [v_type, err_type] = fsutil::read_value(path / "type");
-
-                  if (!v_present.has_value()) {
-                     Logger::error(fsutil::err_to_string(err_present, path / "present"));
-                     continue;
-                  }
-                  if (!v_type.has_value()) {
-                     Logger::error(fsutil::err_to_string(err_type, path / "type"));
-                     continue;
-                  }
-
-                  if (v_present.value() != 1 || !is_in(v_type.value(), "Battery", "UPS")) {
-                     continue;
-                  }
-
-                  bat_dir = path;
-                  new_bat.base_dir = path;
-                  new_bat.device_type = v_type.value();
-
-                  if (fs::exists(bat_dir / "energy_now")) {
-                     new_bat.energy_now = bat_dir / "energy_now";
-                  } else if (fs::exists(bat_dir / "charge_now")) {
-                     new_bat.charge_now = bat_dir / "charge_now";
-                  } else {
-                     new_bat.use_energy_or_charge = false;
-                  }
-
-                  if (fs::exists(bat_dir / "energy_full")) {
-                     new_bat.energy_full = bat_dir / "energy_full";
-                  } else if (fs::exists(bat_dir / "charge_full")) {
-                     new_bat.charge_full = bat_dir / "charge_full";
-                  } else {
-                     new_bat.use_energy_or_charge = false;
-                  }
-
-						if (!new_bat.use_energy_or_charge && !fs::exists(bat_dir / "capacity")) {
-							continue;
-						}
-
-						if (fs::exists(bat_dir / "power_now")) {
-							new_bat.power_now = bat_dir / "power_now";
-						} else if ((fs::exists(bat_dir / "current_now")) && (fs::exists(bat_dir / "voltage_now"))) {
-							 new_bat.current_now = bat_dir / "current_now";
-							 new_bat.voltage_now = bat_dir / "voltage_now";
-						} else {
-							new_bat.use_power = false;
-						}
-
-						if (fs::exists(bat_dir / "AC0/online")) {
-                     new_bat.online = bat_dir / "AC0/online";
-                  } else if (fs::exists(bat_dir / "AC/online")) {
-                     new_bat.online = bat_dir / "AC/online";
-                  }
-
-                  auto bat_filename = bat_dir.filename();
-						batteries[bat_filename] = new_bat;
-						Config::available_batteries.push_back(bat_filename);
-					}
-				} catch (const fs::filesystem_error& e) {
-               Logger::error("Filesystem error " + std::string(e.what()));
-            }
-			}
-
-			if (batteries.empty()) {
-				has_battery = false;
-				return {0, 0, 0, ""};
-			}
-		}
-
-		auto& battery_sel = Config::getS("selected_battery");
-
-		if (auto_sel.empty()) {
-			for (auto& [name, bat] : batteries) {
-				if (bat.device_type == "Battery") {
-					auto_sel = name;
-					break;
-				}
-			}
-			if (auto_sel.empty()) auto_sel = batteries.begin()->first;
-		}
-
-		auto& b = (battery_sel != "Auto" and batteries.contains(battery_sel) ? batteries.at(battery_sel) : batteries.at(auto_sel));
-
-		int percent;
-		long seconds = -1;
-		float watts = -1;
-
-		//? Try to get battery percentage
-      percent = fsutil::read_value_or<int>(b.base_dir / "capacity", -1);
-
-		if (percent < 0) {
-			try {
-				percent = stoll(readfile(b.base_dir / "capacity", "-1"));
-			}
-			catch (const std::invalid_argument&) { }
-			catch (const std::out_of_range&) { }
-		}
-		if (b.use_energy_or_charge and percent < 0) {
-			try {
-				percent = round(100.0 * stoll(readfile(b.energy_now, "-1")) / stoll(readfile(b.energy_full, "1")));
-			}
-			catch (const std::invalid_argument&) { }
-			catch (const std::out_of_range&) { }
-		}
-		if (b.use_energy_or_charge and percent < 0) {
-			try {
-				percent = round(100.0 * stoll(readfile(b.charge_now, "-1")) / stoll(readfile(b.charge_full, "1")));
-			}
-			catch (const std::invalid_argument&) { }
-			catch (const std::out_of_range&) { }
-		}
-		if (percent < 0) {
-			has_battery = false;
-			return {0, 0, 0, ""};
-		}
-
-		//? Get charging/discharging status
-		string status = str_to_lower(readfile(b.base_dir / "status", "unknown"));
-		if (status == "unknown" and not b.online.empty()) {
-			const auto online = readfile(b.online, "0");
-			if (online == "1" and percent < 100) status = "charging";
-			else if (online == "1") status = "full";
-			else status = "discharging";
-		}
-
-		//? Get seconds to empty
-		if (!is_in(status, "charging", "full")) {
-			if (b.use_energy_or_charge ) {
-				if (!b.power_now.empty()) {
-               auto e_now = fsutil::read_value_or<long>(b.energy_now, 0);
-               auto p_now = fsutil::read_value_or<long>(b.power_now, 1);
-               seconds = round((double)e_now / p_now * 3600);
-				} else if (!b.current_now.empty()) {
-               auto ca_now = fsutil::read_value_or<long>(b.charge_now, 0);
-               auto cu_now = fsutil::read_value_or<long>(b.current_now, 1);
-               seconds = round((double)ca_now / cu_now * 3600);
-				}
-			}
-
-			if (seconds < 0 && fs::exists(b.base_dir / "time_to_empty")) {
-            seconds = fsutil::read_value_or<long>(b.base_dir / "time_to_empty", 0) * 60;
-			}
-		}
-
-		//? Get power draw
-		if (b.use_power) {
-			if (!b.power_now.empty()) {
-            watts = (float)fsutil::read_value_or<long>(b.power_now, -1) / 1000000.0;
-			} else if (!b.voltage_now.empty() && !b.current_now.empty()) {
-            auto cu_now = fsutil::read_value_or<long>(b.current_now, -1);
-            auto vo_now = fsutil::read_value_or<long>(b.voltage_now, 1);
-            watts = (float)cu_now / 1000000.0 * vo_now / 1000000.0;
-			}
-
-		}
-
-		return {percent, watts, seconds, status};
-	}
-
-	auto collect(bool no_update) -> cpu_info& {
+   auto collect(bool no_update) -> cpu_info& {
 		if (Runner::stopping or (no_update and not current_cpu.cpu_percent.at("total").empty())) return current_cpu;
 		auto& cpu = current_cpu;
 
@@ -981,8 +802,17 @@ namespace Cpu {
 		if (Config::getB("check_temp") and got_sensors)
 			update_sensors();
 
-		if (Config::getB("show_battery") and has_battery)
-			current_bat = get_battery();
+		if (Config::getB("show_battery") and has_battery) {
+         Battery& bat = Shared::batteryManager.getSelectedBattery();
+         bat.updateState();
+         std::get<0>(current_bat) = bat.percent;
+         std::get<1>(current_bat) = bat.watts;
+         std::get<2>(current_bat) = bat.seconds;
+         if (bat.state == BatteryState::STATE_FULL) std::get<3>(current_bat) = "full";
+         if (bat.state == BatteryState::STATE_CHARGING) std::get<3>(current_bat) = "charging";
+         if (bat.state == BatteryState::STATE_DISCHARGING) std::get<3>(current_bat) = "discharging";
+         else std::get<3>(current_bat) = "unknown";
+      }
 
 		return cpu;
 	}
@@ -3009,23 +2839,6 @@ namespace Proc {
 }
 
 namespace Tools {
-   /*
-	double system_uptime() {
-		string upstr;
-		ifstream pread(Shared::procPath / "uptime");
-		if (pread.good()) {
-			try {
-				getline(pread, upstr, ' ');
-				pread.close();
-				return stod(upstr);
-			}
-			catch (const std::invalid_argument&) {}
-			catch (const std::out_of_range&) {}
-		}
-        throw std::runtime_error("Failed to get uptime from " + string{Shared::procPath} + "/uptime");
-	}
-   */
-
    //? avg 92% perf improvement
    auto system_uptime() -> long {
       struct sysinfo info;
@@ -3034,4 +2847,175 @@ namespace Tools {
       }
       return 0;
    }
+}
+
+Battery::Battery() {
+   use_power = true;
+   use_energy_or_charge = true;
+}
+
+void Battery::updateState() {
+   percent = fsutil::read_value_or<int>(base_dir / "capacity", -1);
+   if (use_energy_or_charge && percent < 0) {
+      auto e_now = fsutil::read_value_or<long>(path_energy_now, -1);
+      auto e_full = fsutil::read_value_or<long>(path_energy_full, 1);
+      percent = round(100.0 * e_now / e_full);
+   }
+
+   if (use_energy_or_charge && percent < 0) {
+      auto c_now = fsutil::read_value_or<long>(path_charge_now, -1);
+      auto c_full = fsutil::read_value_or<long>(path_charge_full, 1);
+      percent = round(100.0 * c_now / c_full);
+	}
+
+   state = getState();
+
+   seconds = -1;
+   if (state != BatteryState::STATE_CHARGING && state != BatteryState::STATE_FULL) {
+      if (use_energy_or_charge) {
+         if (!path_power_now.empty()) {
+            auto e_now = fsutil::read_value_or<long>(path_energy_now, 0);
+            auto p_now = fsutil::read_value_or<long>(path_power_now, 1);
+            seconds = round((double)e_now / p_now * 3600);
+         } else if (!path_current_now.empty()) {
+            auto ca_now = fsutil::read_value_or<long>(path_charge_now, 0);
+            auto cu_now = fsutil::read_value_or<long>(path_current_now, 1);
+            seconds = round((double)ca_now / cu_now * 3600);
+			}
+      }
+      if (seconds < 0 && fs::exists(base_dir / "time_to_empty")) {
+         seconds = fsutil::read_value_or<long>(base_dir / "time_to_empty", 0) * 60;
+      }
+   }
+
+   if (use_power) {
+      if (!path_power_now.empty()) {
+         watts = (float)fsutil::read_value_or<long>(path_power_now, -1) / 1000000.0;
+		} else if (!path_voltage_now.empty() && !path_current_now.empty()) {
+         auto cu_now = fsutil::read_value_or<long>(path_current_now, -1);
+         auto vo_now = fsutil::read_value_or<long>(path_voltage_now, 1);
+         watts = (float)cu_now / 1000000.0 * vo_now / 1000000.0;
+		}
+   }
+}
+
+BatteryState Battery::getState() {
+   auto status = str_to_lower(fsutil::read_value_or<std::string>(
+         base_dir / "status", "unknown"));
+   if (status == "unknown" && !path_online.empty()) {
+      const auto online = fsutil::read_value_or<int>(path_online, 0);
+      if (online == 1 && percent < 100) {
+         status = "charging";
+      } else if (online == 1) {
+         status = "full";
+      } else {
+         status = "discharging";
+      }
+   }
+   if (status == "charging") {
+      return BatteryState::STATE_CHARGING;
+   } else if (status == "discharging") {
+      return BatteryState::STATE_DISCHARGING;
+   } else if (status == "full") {
+      return BatteryState::STATE_FULL;
+   }
+   return BatteryState::STATE_UNKNOWN;
+}
+
+BatteryManager::BatteryManager() {
+
+}
+
+void BatteryManager::enumBatteries() {
+   if (!fs::exists("/sys/class/power_supply")) {
+      m_batteries.clear();
+      m_has_battery = false;
+      return;
+   }
+
+   try {
+      for (const auto& dir_it : fs::directory_iterator("/sys/class/power_supply")) {
+         //? Only consider online power supplies of type Battery or UPS
+         //? https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-class-power
+         Battery new_bat = Battery();
+         fs::path bat_dir;
+
+         fs::path bat_path = dir_it.path();
+         //? Not a directory - skip
+         if (!dir_it.is_directory()) {
+            continue;
+         }
+
+         auto [v_pres, err_pres] = fsutil::read_value<int>(bat_path / "present");
+         auto [v_type, err_type] = fsutil::read_value(bat_path / "type");
+
+         if (!v_pres.has_value()) {
+            Logger::error(fsutil::err_to_string(err_pres, bat_path / "present"));
+            continue;
+         }
+         if (!v_type.has_value()) {
+            Logger::error(fsutil::err_to_string(err_type, bat_path / "type"));
+            continue;
+         }
+         
+         if (v_pres.value() != 1 || !is_in(v_type.value(), "Battery", "UPS")) {
+            continue;
+         }
+
+         new_bat.base_dir = bat_path;
+         new_bat.dev_type = v_type.value();
+
+         if (fs::exists(new_bat.base_dir / "energy_now")) {
+            new_bat.path_energy_now = new_bat.base_dir / "energy_now";
+         } else if (fs::exists(new_bat.base_dir / "charge_now")) {
+            new_bat.path_charge_now = new_bat.base_dir / "charge now";
+         } else {
+            new_bat.use_energy_or_charge = false;
+         }
+
+         if (fs::exists(new_bat.base_dir / "energy_full")) {
+            new_bat.path_energy_full = new_bat.base_dir / "energy_full";
+         } else if (fs::exists(new_bat.base_dir / "charge_full")) {
+            new_bat.path_charge_full = new_bat.base_dir / "charge_full";
+         } else {
+            new_bat.use_energy_or_charge = false;
+         }
+
+         if (!new_bat.use_energy_or_charge && !fs::exists(new_bat.base_dir / "capacity")) {
+            continue;
+         }
+
+         if (fs::exists(new_bat.base_dir / "power_now")) {
+            new_bat.path_power_now = new_bat.base_dir / "power_now";
+         } else if ((fs::exists(bat_dir / "current_now")) && (fs::exists(bat_dir / "voltage_now"))) {
+            new_bat.path_current_now = bat_dir / "current_now";
+				new_bat.path_voltage_now = bat_dir / "voltage_now";
+         } else {
+            new_bat.use_power = false;
+         }
+
+         if (fs::exists(bat_dir / "AC0/online")) {
+            new_bat.path_online = bat_dir / "AC0/online";
+         } else if (fs::exists(bat_dir / "AC/online")) {
+            new_bat.path_online = bat_dir / "AC/online";
+         }
+
+         auto bat_filename = bat_dir.filename();
+         m_batteries[bat_filename] = new_bat;
+         Config::available_batteries.push_back(bat_filename);
+      }
+   } catch (const fs::filesystem_error& e) {
+      Logger::error("Filesystem error " + std::string(e.what()));
+   }
+
+   if (m_batteries.empty()) {
+      m_has_battery = false;
+   }
+}
+
+Battery& BatteryManager::getSelectedBattery() {
+   if (m_batteries.empty()) {
+      enumBatteries();
+   }
+   return m_batteries.begin()->second;
 }

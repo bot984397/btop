@@ -724,7 +724,7 @@ namespace Cpu {
 
 			const auto& [percent, watts, seconds, status] = current_bat;
 
-			if (redraw or percent != old_percent or (watts != old_watts and Config::getB("show_battery_watts")) or seconds != old_seconds or status != old_status) {
+			if (redraw || percent != old_percent || (watts != old_watts && Config::getB("show_battery_watts")) || seconds != old_seconds || status != old_status) {
 				old_percent = percent;
 				old_watts = watts;
 				old_seconds = seconds;
